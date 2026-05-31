@@ -1,0 +1,33 @@
+{
+  "security_policy_version": "1.0.0",
+  "policies": {
+    "identity_and_access": {
+      "description": "Minimalizacja uprawnień kontenera",
+      "rules": [
+        "Kontener NIE MOŻE uruchamiać procesów jako root. Wymagane jest użycie USER.",
+        "Zabronione jest nadawanie uprawnień --privileged."
+      ]
+    },
+    "supply_chain_security": {
+      "description": "Zabezpieczenie pochodzenia obrazów",
+      "rules": [
+        "Zakaz używania tagów 'latest'. Wymagane wersjonowanie semantyczne lub SHA.",
+        "Obrazy bazowe muszą pochodzić z zaufanych rejestrów (np. oficjalne obrazy Docker Official Images)."
+      ]
+    },
+    "secrets_management": {
+      "description": "Zapobieganie wyciekom danych",
+      "rules": [
+        "Zakaz przechowywania sekretów (klucze API, hasła) w ENV, ARG lub plikach warstw.",
+        "Wykrywanie hardkodowanych poświadczeń za pomocą analizy wzorców."
+      ]
+    },
+    "network_hardening": {
+      "description": "Ograniczenie powierzchni ataku",
+      "rules": [
+        "Porty administracyjne (SSH - 22, Telnet - 23) są surowo zabronione wewnątrz kontenera.",
+        "Należy wystawiać tylko niezbędne porty aplikacji."
+      ]
+    }
+  }
+}
