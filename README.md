@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 AI Security Pipeline Guard
 
 Narzędzie automatyzujące audyt bezpieczeństwa plików Dockerfile w oparciu o zdefiniowane polityki (Policy-as-Code) oraz analizę LLM.
@@ -86,3 +87,6 @@ Least Privilege
 
 Licencja
 Projekt własny (Internal/Private).
+=======
+# ai-security-pipeline-guard
+>>>>>>> 956190a21a35331d723ee9e109efcb5509713e86
