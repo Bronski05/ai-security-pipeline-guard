@@ -1,55 +1,49 @@
-<<<<<<< HEAD
-AI Security Pipeline Guard
+## AI Security Pipeline Guard
 
-Narzędzie automatyzujące audyt bezpieczeństwa plików Dockerfile w oparciu o zdefiniowane polityki (Policy-as-Code) oraz analizę LLM.
-
-
-
-
-Funkcjonalności
-
-Policy-as-Code: Reguły bezpieczeństwa w formacie JSON, oddzielone od logiki skanera.
-
-Analiza kontekstowa: Wykorzystanie modelu Gemini do wykrywania luk (m.in. hardkodowane sekrety, uprawnienia roota).
-
-Raportowanie: Automatyczny zapis wyników do plików .json z podziałem na domeny bezpieczeństwa.
-
-Resilience: Wbudowany mechanizm retry (exponential backoff) dla zapytań API.
+A DevSecOps tool automating security audits for both **application source code** and **infrastructure (IaC)**. It leverages dynamic prompts and LLM models (Google Gemini) to detect security vulnerabilities based on defined policies (Policy-as-Code).
 
 
 
 
+## Key Features
 
-Struktura projektu
-
-├── rules/           # Definicje polityk (JSON)
-├── src/             # Logika skanera (Python)
-├── reports/         # Raporty z audytów (JSON)
-├── examples/        # Testowe pliki Dockerfile
-└── .env             # Zmienne środowiskowe (nie commitować!)
-
-
+* **Context-Aware Scanning:** The system automatically identifies the file type and applies the appropriate analytical context:
+    * `Infrastructure as Code` (Dockerfile/docker-compose): Scans for configuration vulnerabilities (e.g., root privileges, exposed ports, insecure base images).
+    * `Application Code` (Python): Detects code-level vulnerabilities (e.g., SQL Injection, hardcoded secrets).
+* **Policy-as-Code:** Security rules are maintained as flexible JSON files, decoupled from the core scanner logic.
+* **API Resilience:** Built-in mechanisms for Rate Limiting and exponential backoff to handle HTTP 429/503 errors.
+* **Automated Reporting:** Outputs results to structured `.json` files, ready for dashboard integration.
 
 
-Instalacja i uruchomienie
-
-Wymagania: Python 3.10+
 
 
-Instalacja zależności:
+## Project Structure
+
+```text
+├── rules/          # Policy definitions in JSON format (Policy-as-Code)
+├── src/            # Core scanner logic and API integration (scanner.py)
+├── reports/        # Automatically generated audit reports (.json)
+├── examples/       # Testing ground: insecure .py and .Dockerfile examples
+├── .github/        # CI/CD configuration (GitHub Actions Workflow)
+└── .env            # Environment variables (ignored by Git)
+```
+
+
+
+## Installation and Setup
+
+Requirements: Python 3.10+
+
+Install dependencies:
 
 Bash
-pip install -r requirements.txt
+pip install google-genai python-dotenv
+API Key Configuration:
+Create a .env file in the root directory and add your Google Gemini API key:
 
+GOOGLE_API_KEY=your_api_key_here
 
-Konfiguracja klucza API:
-
-Stwórz plik .env i dodaj:
-
-GOOGLE_API_KEY=twoj_klucz_api
-
-
-Uruchomienie:
+Run the Scanner:
 
 Bash
 python src/scanner.py
@@ -57,36 +51,21 @@ python src/scanner.py
 
 
 
-Integracja (CI/CD)
-Przykład wdrożenia w GitHub Actions:
+## CI/CD Integration (GitHub Actions)
 
-YAML
-jobs:
-  security-audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Run Scan
-        run: python src/scanner.py
-        env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+This project is designed to run in a fully automated CI/CD environment. The provided example workflow triggers a security audit on every push to the repository (leveraging GitHub Secrets). The pipeline is configured in .github/workflows/security-scan.yml.
 
 
 
+## Audit Standards
 
-Standardy audytu
-System weryfikuje konfigurację pod kątem:
+Depending on the file context, the system implicitly verifies compliance against industry standards utilizing the LLM's training knowledge:
 
-CIS Benchmarks (Docker)
+OWASP Top 10 (Application vulnerabilities: Injection, Broken Access Control, hardcoded secrets).
 
-NIST (Secrets & Supply Chain)
-
-Least Privilege
+CIS Benchmarks (Docker configuration, Least Privilege, resource management).
 
 
 
-Licencja
-Projekt własny (Internal/Private).
-=======
-# ai-security-pipeline-guard
->>>>>>> 956190a21a35331d723ee9e109efcb5509713e86
+## License
+Personal project (Internal/Private).
