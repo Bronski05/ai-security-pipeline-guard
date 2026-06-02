@@ -1,12 +1,12 @@
 import json
 import os
 import time
+import re
 from datetime import datetime
 from pathlib import Path
 from google import genai
 from dotenv import load_dotenv
 
-# Załadowanie zmiennych środowiskowych
 load_dotenv()
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
@@ -18,10 +18,24 @@ def get_security_policy():
     except FileNotFoundError:
         return {"note": "Brak specyficznej polityki. Użyj ogólnych zasad bezpieczeństwa."}
 
-def get_system_prompt(file_path, policy):
-    """Zwraca dedykowany prompt w zależności od typu pliku."""
-    filename = str(file_path).lower()
+def redact_secrets_locally(content):
+    """
+    Inteligentne maskowanie (Data Redaction).
+    Wykrywa sekrety, podmienia je na bezpieczne wartości i zwraca oczyszczony kod.
+    """
+    # Szukamy zmiennych typu hasło/klucz i podmieniamy ich wartość
+    pattern1 = re.compile(r'(?i)(api_key|password|secret|token)(\s*[:=]\s*)(["\'][a-zA-Z0-9_\-]+["\'])')
+    sanitized, count1 = pattern1.subn(r'\1\2"[REDACTED_BY_SECURITY_SCANNER]"', content)
     
+    # Szukamy kluczy AWS
+    pattern2 = re.compile(r'AKIA[A-Z0-9]{16}')
+    sanitized, count2 = pattern2.subn(r'"[REDACTED_AWS_KEY]"', sanitized)
+    
+    has_secrets = (count1 + count2) > 0
+    return sanitized, has_secrets
+
+def get_system_prompt(file_path, policy):
+    filename = str(file_path).lower()
     if "docker" in filename or "compose" in filename:
         return f"""Jesteś ekspertem DevSecOps. Audytuj plik infrastruktury: {{content}}
         Polityka: {json.dumps(policy)}.
@@ -35,20 +49,38 @@ def get_system_prompt(file_path, policy):
     Jeśli plik jest bezpieczny, zwróć {"status": "COMPLIANT", "violations": []}"""
 
 def run_security_scan(file_path, policy):
-    """Przesyła plik do API z obsługą limitów."""
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    prompt = get_system_prompt(file_path, policy).replace("{content}", content)
+    # 1. INTELIGENTNE MASKOWANIE SEKRETÓW
+    sanitized_content, has_secrets = redact_secrets_locally(content)
+
+    if has_secrets:
+        print(f"[INFO] Wykryto i zamaskowano sekrety w pliku {file_path}. Kontynuuję skanowanie LLM...")
+
+    # 2. Wysyłka oczyszczonego kodu (sanitized_content) do AI
+    prompt = get_system_prompt(file_path, policy).replace("{content}", sanitized_content)
     
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.5-flash",
                 contents=prompt,
             )
             clean_json = response.text.replace('```json', '').replace('```', '').strip()
-            return json.loads(clean_json)
+            result_json = json.loads(clean_json)
+            
+            # 3. Dodanie lokalnego znaleziska do końcowego raportu z AI
+            if has_secrets:
+                if result_json.get("status") == "COMPLIANT":
+                    result_json["status"] = "NON_COMPLIANT"
+                if "violations" not in result_json:
+                    result_json["violations"] = []
+                # Wpychamy naszą informację na samą górę listy naruszeń
+                result_json["violations"].insert(0, "[LOCAL FILTER] Wykryto twardo zapisane hasło/klucz. Wartość zamaskowano przed wysłaniem do LLM.")
+                
+            return result_json
+
         except Exception as e:
             error_msg = str(e).lower()
             if "429" in error_msg or "503" in error_msg or "quota" in error_msg:
@@ -60,7 +92,6 @@ def run_security_scan(file_path, policy):
     return {"status": "ERROR", "violations": ["Przekroczono limit prób API"]}
 
 def save_report(results):
-    """Zapisuje wyniki do pliku."""
     os.makedirs('reports', exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_path = f"reports/scan_{timestamp}.json"
@@ -71,15 +102,12 @@ def save_report(results):
 if __name__ == "__main__":
     policy = get_security_policy()
     
-    # Skanujemy TYLKO folder examples/
     targets = []
     examples_path = Path('examples')
     if examples_path.exists():
         targets.extend(examples_path.rglob('*.py'))
         targets.extend(examples_path.rglob('*docker*'))
             
-    print(f"DEBUG: Pliki do przeskanowania: {[str(t) for t in targets]}")
-    
     final_report = {"scan_date": str(datetime.now()), "files": {}}
     
     for target in targets:
