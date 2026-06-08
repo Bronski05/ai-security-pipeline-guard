@@ -1,93 +1,74 @@
-## AI Security Pipeline Guard
+# AI Security Pipeline Guard
 
-A DevSecOps tool automating security audits for both **application source code** and **infrastructure (IaC)**. It leverages dynamic prompts and LLM models (Google Gemini) to detect security vulnerabilities based on defined policies (Policy-as-Code).
+A Python-based CLI scanner and GitHub Action designed to detect security flaws in source code and Docker configurations using the Gemini API. 
 
-
-
-
-## Key Features
-
-* **Data Leak Prevention (DLP):** Locally masks hardcoded secrets (API keys, AWS tokens, passwords) using regex *before* any data is sent to the LLM.
-* **Incremental Scanning:** Accepts specific file paths via CLI arguments to scan only modified files, optimizing API usage and CI/CD execution time.
-* **Context-Aware Scanning:** The system automatically identifies the file type and applies the appropriate analytical context:
-    * `Infrastructure as Code` (Dockerfile/docker-compose): Scans for configuration vulnerabilities (e.g., root privileges, exposed ports, insecure base images).
-    * `Application Code` (Python): Detects code-level vulnerabilities (e.g., SQL Injection, hardcoded secrets).
-* **Policy-as-Code:** Security rules are maintained as flexible JSON files, decoupled from the core scanner logic.
-* **API Resilience:** Built-in mechanisms for Rate Limiting and exponential backoff to handle HTTP 429/503 errors.
-* **Automated Reporting:** Outputs results to structured `.json` files, ready for dashboard integration.
+The project implements a hybrid approach: it combines traditional deterministic security filters (Regex) with LLM analysis to enforce security rules without leaking sensitive data to the cloud.
 
 
 
+##  How It Works (Pipeline Steps)
 
-## Project Structure
+1. **Policy-as-Code:** The scanner loads security guidelines from a decoupled configuration file (`rules/docker_rules.json`).
+2. **Local DLP Pre-filter:** Before making any cloud API calls, a local pre-compiled regex filter inspects the code. If any hardcoded credentials (API keys, AWS tokens, passwords) are found, they are redacted locally (`re.subn()`).
+3. **Resilient API Request:** The sanitized code and the JSON policy are sent to the Gemini API. The network call is wrapped in a `Tenacity` retry decorator using exponential backoff to handle rate limits or transient errors.
+4. **Schema Enforcement:** The raw JSON output from the AI is validated against a strict structure using a `Pydantic` model (`BaseModel`). Any malformed response or hallucination triggers a handled `ValidationError`.
+5. **Deterministic Override (Safety Fuse):** If the local DLP filter detected a secret in Step 2, the Python script automatically overrides the AI's verdict, forcing the final status to `NON_COMPLIANT` and injecting a local priority alert.
+6. **Artifact Output:** The validated result is saved as a structured JSON report in the `reports/` directory with a unique timestamp.
+
+
+
+##  Project Structure
+
+```text
+├── rules/          # Security rules in JSON format (Policy-as-Code)
+├── src/            # Core Python scanner logic (scanner.py)
+├── tests/          # Automated unit tests (test_scanner.py)
+├── reports/        # Generated JSON audit reports (Git-ignored)
+├── examples/       # Vulnerable code samples used for scanner testing
+├── .github/        # CI/CD pipelines (GitHub Actions Workflow)
+└── requirements.txt# Project dependencies with minimal version constraints
+
 
 ```
-├── rules/          # Policy definitions in JSON format (Policy-as-Code)
-├── src/            # Core scanner logic and API integration (scanner.py)
-├── tests/          # Unit tests for security filters (e.g., secret redaction)
-├── reports/        # Automatically generated audit reports (.json)
-├── examples/       # Testing ground: insecure .py and .Dockerfile examples
-├── .github/        # CI/CD configuration (GitHub Actions Workflow)
-└── .env            # Environment variables (ignored by Git)
-```
+##  Setup & Installation
 
+Prerequisites
+Python 3.10+
 
+A Google Gemini API Key
 
-
-## Installation and Setup
-
-Requirements: Python 3.10+
-
-Install dependencies:
+1. Install Dependencies
+Install all required production and testing libraries from the package manifest:
 
 Bash
-pip install google-genai python-dotenv pytest
+pip install -r requirements.txt
 
-** API Key Configuration:
-Create a .env file in the root directory and add your Google Gemini API key:
+2. Configure Credentials
+Create a .env file in the root directory of the project and add your API key:
 
-GOOGLE_API_KEY=your_api_key_here
+Bash
+GOOGLE_API_KEY=your_actual_gemini_api_key_here
+(Note: The .env file is automatically ignored by Git to prevent accidental leaks).
 
-
-Run the Scanner:
-
-** Full Scan (Default): Scans all compatible files in the examples/ directory.
-
+## Usage
+Full Scan (Default)
+Scans all compatible code and configuration files found in the target directories:
 Bash
 python src/scanner.py
 
 
-** Incremental Scan (CI/CD Optimized): Provide specific file paths to scan only those files.
-
+Incremental Scan (CI/CD Optimized)
+Pass specific file paths via command-line arguments to scan only modified files, saving memory and API quota:
 Bash
 python src/scanner.py examples/insecure_app.py
 
 
-** Testing
-
-To ensure the local secret redaction filter is working correctly, run the automated test suite:
+##  Running Tests
+The project includes an automated test suite powered by pytest to verify the regular expressions and the local override logic. To execute the tests, run:
 
 Bash
 pytest
 
 
-
-
-## CI/CD Integration (GitHub Actions)
-
-This project is designed to run in a fully automated CI/CD environment. The provided example workflow triggers a security audit on every push to the repository (leveraging GitHub Secrets). The pipeline is configured in .github/workflows/security-scan.yml.
-
-
-
-## Audit Standards
-
-Depending on the file context, the system implicitly verifies compliance against industry standards utilizing the LLM's training knowledge:
-
-OWASP Top 10 (Application vulnerabilities: Injection, Broken Access Control, hardcoded secrets).
-
-CIS Benchmarks (Docker configuration, Least Privilege, resource management).
-
-
-
-## License
-Personal project (Internal/Private).
+## CI/CD Automation
+This scanner is designed to run automatically on every code change. The repository includes a GitHub Actions workflow located in .github/workflows/security_scan.yml. It triggers an audit on every push and pull_request, pulling the API credentials securely from GitHub encrypted secrets.

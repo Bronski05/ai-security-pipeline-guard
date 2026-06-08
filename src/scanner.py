@@ -1,16 +1,26 @@
 import json
 import os
-import time
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
 from google import genai
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field, ValidationError
+from typing import List
+from tenacity import retry, stop_after_attempt, wait_exponential
 
-# Wczytanie zmiennych środowiskowych i inicjalizacja klienta
 load_dotenv()
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+
+class Violation(BaseModel):
+    issue: str = Field(description="Opis wykrytej podatności")
+    criticality: str = Field(description="Poziom zagrożenia: HIGH, MEDIUM, LOW")
+    remediation: str = Field(description="Sposób naprawienia błędu")
+
+class SecurityReport(BaseModel):
+    status: str = Field(description="Status ogólny: COMPLIANT lub NON_COMPLIANT")
+    violations: List[Violation] = Field(default=[])
 
 def get_security_policy():
     """Wczytuje reguły bezpieczeństwa z pliku JSON (Policy-as-Code)."""
@@ -21,15 +31,10 @@ def get_security_policy():
         return {"note": "Brak specyficznej polityki. Użyj ogólnych zasad bezpieczeństwa."}
 
 def redact_secrets_locally(content):
-    """
-    Zabezpiecza hardcodowane sekrety przed wysłaniem do zewnętrznego API (Data Redaction).
-    Zwraca zanonimizowany kod oraz flagę informującą, czy coś zostało ukryte.
-    """
-    # Wyłapywanie standardowych kluczy i haseł
+    """Zabezpiecza hardcodowane sekrety przed wysłaniem do zewnętrznego API (DLP)."""
     pattern1 = re.compile(r'(?i)(api_key|password|secret|token)(\s*[:=]\s*)(["\'][a-zA-Z0-9_\-]+["\'])')
     sanitized, count1 = pattern1.subn(r'\1\2"[REDACTED_BY_SECURITY_SCANNER]"', content)
     
-    # Wyłapywanie kluczy AWS
     pattern2 = re.compile(r'AKIA[A-Z0-9]{16}')
     sanitized, count2 = pattern2.subn(r'"[REDACTED_AWS_KEY]"', sanitized)
     
@@ -42,58 +47,74 @@ def get_system_prompt(file_path, policy):
     if "docker" in filename or "compose" in filename:
         return f"""Jesteś ekspertem DevSecOps. Audytuj plik infrastruktury: {{content}}
         Polityka: {json.dumps(policy)}.
-        Zwróć wynik WYŁĄCZNIE jako JSON:
+        Zwróć wynik WYŁĄCZNIE jako JSON zgodny ze schematem:
         {{"status": "NON_COMPLIANT", "violations": [{{"issue": "...", "criticality": "HIGH/MEDIUM/LOW", "remediation": "..."}}]}}
         Jeśli plik jest bezpieczny, zwróć {{"status": "COMPLIANT", "violations": []}}"""
     
     return """Jesteś ekspertem bezpieczeństwa kodu. Audytuj ten plik: {content}.
-    Zwróć wynik WYŁĄCZNIE jako JSON:
-    {"status": "NON_COMPLIANT", "violations": ["lista naruszeń"]}
+    Zwróć wynik WYŁĄCZNIE jako JSON zgodny ze schematem:
+    {"status": "NON_COMPLIANT", "violations": [{"issue": "...", "criticality": "HIGH/MEDIUM/LOW", "remediation": "..."}]}
     Jeśli plik jest bezpieczny, zwróć {"status": "COMPLIANT", "violations": []}"""
 
-def run_security_scan(file_path, policy):
-    """Główna funkcja skanująca plik przy pomocy lokalnych filtrów i modelu LLM."""
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=4, max=15),
+    reraise=True
+)
+def call_gemini_api_with_retry(prompt):
+    """Wysyła zapytanie do API Gemini z automatycznym mechanizmem ponawiania prób."""
+    return client.models.generate_content(
+        model="gemini-1.5-flash", 
+        contents=prompt,
+    )
 
-    # 1. Maskowanie danych przed wysyłką
+def run_security_scan(file_path, policy):
+    """Główna funkcja skanująca plik przy pomocy lokalnych filtrów, Tenacity i Pydantic."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "violations": [{"issue": f"Nie można otworzyć pliku: {e}", "criticality": "HIGH", "remediation": "Sprawdź uprawnienia do pliku."}]
+        }
+
     sanitized_content, has_secrets = redact_secrets_locally(content)
     if has_secrets:
         print(f"[INFO] Wykryto i zamaskowano sekrety w pliku {file_path}. Kontynuuję skanowanie ...")
 
-    # 2. Przygotowanie promptu z bezpiecznym kodem
     prompt = get_system_prompt(file_path, policy).replace("{content}", sanitized_content)
     
-    # 3. Wysłanie do AI z mechanizmem retry (odporność na limity API)
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.5-flash", 
-                contents=prompt,
-            )
-            # Czyszczenie odpowiedzi z ewentualnych znaczników Markdown
-            clean_json = response.text.replace('```json', '').replace('```', '').strip()
-            result_json = json.loads(clean_json)
+    try:
+        response = call_gemini_api_with_retry(prompt)
+        clean_json = response.text.replace('```json', '').replace('`', '').strip()
+        
+        report_data = SecurityReport.model_validate_json(clean_json)
+        result_json = report_data.model_dump()
+        
+        if has_secrets:
+            if result_json.get("status") == "COMPLIANT":
+                result_json["status"] = "NON_COMPLIANT"
             
-            # 4. Jeśli lokalnie zamaskowaliśmy sekret, dodajemy to do raportu AI
-            if has_secrets:
-                if result_json.get("status") == "COMPLIANT":
-                    result_json["status"] = "NON_COMPLIANT"
-                if "violations" not in result_json:
-                    result_json["violations"] = []
-                result_json["violations"].insert(0, "[LOCAL FILTER] Zamaskowano twardo zapisane hasło/klucz zapobiegając wyciekowi.")
-                
-            return result_json
+            local_violation = {
+                "issue": "[LOCAL FILTER] Zamaskowano twardo zapisane hasło/klucz zapobiegając wyciekowi.",
+                "criticality": "HIGH",
+                "remediation": "Zmień poświadczenia i przenieś je do zmiennych środowiskowych."
+            }
+            result_json["violations"].insert(0, local_violation)
+            
+        return result_json
 
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "429" in error_msg or "503" in error_msg or "quota" in error_msg:
-                print(f"[WARN] Limit API (429/503). Czekam 15s (próba {attempt+1}/3)...")
-                time.sleep(15)
-                continue
-            return {"status": "ERROR", "violations": [f"Błąd API: {e}"]}
-            
-    return {"status": "ERROR", "violations": ["Przekroczono limit prób API"]}
+    except ValidationError as ve:
+        return {
+            "status": "ERROR", 
+            "violations": [{"issue": f"Błąd walidacji danych (Pydantic): {ve}", "criticality": "HIGH", "remediation": "Zweryfikuj prompt lub model AI."}]
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR", 
+            "violations": [{"issue": f"Krytyczny błąd połączenia z API (Tenacity Fail): {e}", "criticality": "HIGH", "remediation": "Sprawdź status usługi chmurowej."}]
+        }
 
 def save_report(results):
     """Zapisuje gotowy raport do czytelnego pliku JSON."""
@@ -108,7 +129,6 @@ if __name__ == "__main__":
     policy = get_security_policy()
     targets = []
     
-    # TRYB PRZYROSTOWY: Sprawdzamy, czy do komendy dodano ścieżki plików
     if len(sys.argv) > 1:
         print("[INFO] Uruchomiono ze wskazanymi plikami. Skanuję tylko te podane w terminalu...")
         for arg in sys.argv[1:]:
@@ -118,7 +138,6 @@ if __name__ == "__main__":
             else:
                 print(f"[WARN] Plik {arg} nie istnieje - pomijam.")
                 
-    # TRYB PEŁNY: Domyślne zachowanie, jeśli uruchomiono skrypt bez argumentów
     else:
         print("[INFO] Brak argumentów. Skanuję domyślnie cały folder 'examples/'...")
         examples_path = Path('examples')
@@ -126,9 +145,8 @@ if __name__ == "__main__":
             targets.extend(examples_path.rglob('*.py'))
             targets.extend(examples_path.rglob('*docker*'))
             
-    # Zabezpieczenie przed skanowaniem pustej listy
     if not targets:
-        print("[INFO] Brak plików do przeskanowania. Kończę pracę.")
+        print("[INFO] Brak plików do przeskanowania. ")
         sys.exit(0)
 
     final_report = {"scan_date": str(datetime.now()), "files": {}}
@@ -137,6 +155,5 @@ if __name__ == "__main__":
         print(f"\n[SCANNING] {target}")
         result = run_security_scan(target, policy)
         final_report["files"][str(target)] = result
-        time.sleep(15) # Odpoczynek dla limitów API
 
     save_report(final_report)
