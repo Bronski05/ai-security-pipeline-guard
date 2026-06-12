@@ -151,9 +151,24 @@ if __name__ == "__main__":
 
     final_report = {"scan_date": str(datetime.now()), "files": {}}
     
+    # Zmienna pomocnicza do śledzenia, czy znaleźliśmy błędy
+    has_violations = False
+
     for target in targets:
         print(f"\n[SCANNING] {target}")
         result = run_security_scan(target, policy)
         final_report["files"][str(target)] = result
+        
+        #  Sprawdzamy na bieżąco, czy status to NON_COMPLIANT
+        if result.get("status") == "NON_COMPLIANT":
+            has_violations = True
 
     save_report(final_report)
+
+    #  Jeśli wykryto błędy, kończymy z kodem 1, aby GitHub Actions zasygnalizował błąd
+    if has_violations:
+        print("\n[FAILURE] Skanowanie zakończone niepowodzeniem. Wykryto podatności bezpieczeństwa!")
+        sys.exit(1)
+    else:
+        print("\n[SUCCESS] Wszystkie pliki są bezpieczne zgodne z polityką.")
+        sys.exit(0)

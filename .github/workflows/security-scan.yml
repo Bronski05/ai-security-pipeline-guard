@@ -7,17 +7,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Wymagane, aby Git widział historię commitów i mógł porównać zmiany
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            **.py
+            **docker**
+            **Dockerfile
+
       - name: Run AI Security Guard
-        run: python src/scanner.py
+        # Jeśli są zmienione pliki, skanuj tylko je. Jeśli nie ma (np. pierwszy push), skrypt domyślnie sprawdzi examples/
+        run: |
+          if [ "${{ steps.changed-files.outputs.any_changed }}" = "true" ]; then
+            python src/scanner.py ${{ steps.changed-files.outputs.all_changed_files }}
+          else
+            python src/scanner.py
+          fi
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
