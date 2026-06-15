@@ -20,6 +20,7 @@ flowchart TD
     G --> H
     
     H --> I(Exit Code 0 or sys.exit 1)
+```
 
 
 #  How It Works (Pipeline Steps)
