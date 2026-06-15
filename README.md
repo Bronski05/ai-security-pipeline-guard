@@ -5,20 +5,21 @@ A Python-based CLI scanner and GitHub Action designed to detect security flaws i
 The project implements a hybrid approach: it combines traditional deterministic security filters (Regex) with LLM analysis to enforce security rules without leaking sensitive data to the cloud.
 
 
-[ Target File ] ──> [ 1. Local DLP Filter (RegEx) ] ──> ( Secrets Masked? )
-                              │                                   ┌─────────────────────────────────────────────────────────┴─────┐
-                              │                                ( NO )                                                          ( YES )
-                              │                                   │                                                               ▼
-                              ▼                                   ▼                                                    [ Force NON_COMPLIANT ]
-                   [ 2. Inject Policy JSON ]                      │                                                               │
-                              ▼                                   │                                                               │
-                    [ 3. Gemini Cloud API ]                       │                                                               │
-                              ▼                                   │                                                               │
-                  [ 4. Pydantic Validation ]                      │                                                               │
-                              │                                   │                                                               │
-                              └───────────────────────> [ 5. Quality Gate ] <─────────────────────────────────────────────────────┘
-                                                                  ▼
-                                                   ( Exit Code 0 or sys.exit(1) )
+```mermaid
+flowchart TD
+    A[Target File] --> B[1. Local DLP Filter: RegEx]
+    B --> C{Secrets Masked?}
+    
+    C -- YES --> D[Force NON_COMPLIANT]
+    C -- NO --> E[2. Inject Policy JSON]
+    
+    E --> F[3. Gemini Cloud API]
+    F --> G[4. Pydantic Validation]
+    
+    D --> H[5. Quality Gate]
+    G --> H
+    
+    H --> I(Exit Code 0 or sys.exit 1)
 
 
 #  How It Works (Pipeline Steps)
