@@ -6,20 +6,18 @@ The project implements a hybrid approach: it combines traditional deterministic 
 
 
 ```mermaid
-flowchart TD
-    A[Target File] --> B[1. Local DLP Filter: RegEx]
-    B --> C{Secrets Masked?}
+graph TD
+    A[Target File] --> B[1. Local DLP Filter RegEx]
+    B --> C[2. Inject Policy JSON]
+    C --> D[3. Gemini Cloud API]
+    D --> E[4. Pydantic Validation]
+    E --> F{Were Secrets Masked?}
     
-    C -- YES --> D[Force NON_COMPLIANT]
-    C -- NO --> E[2. Inject Policy JSON]
+    F -- YES --> G[5. Force NON_COMPLIANT + Inject Alert]
+    F -- NO --> H[Use AI Verdict]
     
-    E --> F[3. Gemini Cloud API]
-    F --> G[4. Pydantic Validation]
-    
-    D --> H[5. Quality Gate]
-    G --> H
-    
-    H --> I(Exit Code 0 or sys.exit 1)
+    G --> I[6. Quality Gate Exit Code 0/1]
+    H --> I
 ```
 
 
@@ -74,10 +72,12 @@ Targeted Scan (CI/CD Mode): Scan specific files to optimize API quota.
 
 Bash
 python src/scanner.py examples/vulnerable_app.py
-Running Automated Tests
 
 
-# The project includes a pytest suite to verify the DLP regular expressions and deterministic override logic:
+# Running Automated Tests
+
+
+The project includes a pytest suite to verify the DLP regular expressions and deterministic override logic:
 
 Bash
 pytest
