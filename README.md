@@ -6,23 +6,19 @@ The project implements a hybrid approach: it combines traditional deterministic 
 
 
 [ Target File ] ──> [ 1. Local DLP Filter (RegEx) ] ──> ( Secrets Masked? )
-                                                               │
-     ┌─────────────────────────────────────────────────────────┴─────┐
-  ( NO )                                                         ( YES )
-     │                                                               │
-     ▼                                                               ▼
-[ Force NON_COMPLIANT ]                                   [ 2. Inject Policy JSON ]
-     │                                                               │
-     │                                                               ▼
-     │                                                    [ 3. Gemini Cloud API ]
-     │                                                               │
-     │                                                               ▼
-     │                                                    [ 4. Pydantic Validation ]
-     │                                                               │
-     └───────────────────────> [ 5. Quality Gate ] <─────────────────┘
-                                     │
-                                     ▼
-                        ( Exit Code 0 or sys.exit(1) )
+                              │                                   ┌─────────────────────────────────────────────────────────┴─────┐
+                              │                                ( NO )                                                          ( YES )
+                              │                                   │                                                               ▼
+                              ▼                                   ▼                                                    [ Force NON_COMPLIANT ]
+                   [ 2. Inject Policy JSON ]                      │                                                               │
+                              ▼                                   │                                                               │
+                    [ 3. Gemini Cloud API ]                       │                                                               │
+                              ▼                                   │                                                               │
+                  [ 4. Pydantic Validation ]                      │                                                               │
+                              │                                   │                                                               │
+                              └───────────────────────> [ 5. Quality Gate ] <─────────────────────────────────────────────────────┘
+                                                                  ▼
+                                                   ( Exit Code 0 or sys.exit(1) )
 
 
 #  How It Works (Pipeline Steps)
