@@ -4,6 +4,7 @@ A Python-based CLI scanner and GitHub Action designed to detect security flaws i
 
 The project implements a hybrid approach: it combines traditional deterministic security filters (Regex) with LLM analysis to enforce security rules without leaking sensitive data to the cloud.
 
+[![Security Audit](https://github.com/Bronski05/ai-security-pipeline-guard/actions/workflows/security-scan.yml/badge.svg)](https://github.com/Bronski05/ai-security-pipeline-guard/actions/workflows/security-scan.yml)
 
 ```mermaid
 graph TD
