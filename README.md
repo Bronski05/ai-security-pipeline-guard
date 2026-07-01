@@ -1,20 +1,22 @@
 # AI Security Pipeline Guard
 
-A Python-based CLI scanner and GitHub Action designed to detect security flaws in source code and Docker configurations using the Gemini API. 
+A Python CLI tool and GitHub Action that scans source code and Docker configurations for security issues.
 
-The project implements a hybrid approach: it combines traditional deterministic security filters (Regex) with LLM analysis to enforce security rules without leaking sensitive data to the cloud.
+It uses rule-based checks (regex/static patterns) as the primary detection layer, with optional LLM validation for edge cases.
+
+Sensitive data is filtered locally before any external API calls.
 
 [![Security Audit](https://github.com/Bronski05/ai-security-pipeline-guard/actions/workflows/security-scan.yml/badge.svg)](https://github.com/Bronski05/ai-security-pipeline-guard/actions/workflows/security-scan.yml)
 
 ```mermaid
 graph TD
     A[Target File] --> B[1. Local DLP Filter RegEx]
-    B --> C[2. Inject Policy JSON]
+    B --> C[2. Apply policy rules]
     C --> D[3. Gemini Cloud API]
     D --> E[4. Pydantic Validation]
     E --> F{Were Secrets Masked?}
     
-    F -- YES --> G[5. Force NON_COMPLIANT + Inject Alert]
+    F -- YES --> G[5. Override result to NON_COMPLIANT]
     F -- NO --> H[Use AI Verdict]
     
     G --> I[6. Quality Gate Exit Code 0/1]
@@ -24,17 +26,17 @@ graph TD
 
 #  How It Works (Pipeline Steps)
 
-Policy-as-Code: Loads security guidelines from a decoupled configuration file (rules/docker_rules.json).
+- **Policy loading (policy-as-code):** Rules are loaded from `rules/docker_rules.json` and define scan patterns for code and Docker configs.
 
-Local DLP Pre-filter: A local pre-compiled regex filter inspects the code. If any hardcoded credentials (API keys, AWS tokens, passwords) are found, they are redacted locally (re.subn()) before any cloud API calls.
+- **Local secret detection (DLP pre-filter):** Code is scanned locally using regex rules to detect secrets (API keys, tokens, passwords). Matches are redacted before any external processing.
 
-Resilient Cloud Call: The sanitized code is sent to the Gemini API. The network call is wrapped in a Tenacity retry decorator using exponential backoff to handle transient errors.
+- **External analysis (Gemini API):** Sanitized input is sent to the LLM for additional validation. Retry with exponential backoff handles rate limits and transient failures.
 
-Schema Enforcement: Raw JSON output from the AI is validated against a strict Pydantic model (BaseModel) to eliminate hallucinations.
+- **Response validation:** Output is validated with a strict Pydantic schema.
 
-Deterministic Override (Safety Fuse): If a secret was masked in Step 2, the script automatically overrides the AI's verdict, forcing the final status to NON_COMPLIANT.
+- **Safety override:** If secrets were detected locally, the result is forced to `NON_COMPLIANT`.
 
-Quality Gate (Exit Codes): Returns sys.exit(1) upon detecting NON_COMPLIANT status, allowing it to natively block unsafe deployments in CI/CD.
+- **CI/CD quality gate:** The tool exits with `sys.exit(1)` on violations to block CI pipelines.
 
 
 
